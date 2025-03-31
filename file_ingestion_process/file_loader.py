@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from src import logger
 import configparser
 
-
+NO_ERRORS = 'No errors'
 parent_directory = ''
 # '/home/server_user/server/temp'
 database_credentials = ''
@@ -137,7 +137,7 @@ class FileLoader:
             raise e 
 
 
-    def _fakeupsert_synclog(self, file_path, tablename):
+    def _fakeupsert_synclog(self, decrypted_file_name, staging_table):
         '''
         Performs a fake upsert operation on the sync_file table.
         This method updates an existing record in the sync_file table if it exists, or inserts a new one if it doesn't. 
@@ -151,24 +151,22 @@ class FileLoader:
         try:
             conn = self._db_connect('filedb')[0]
             cur = conn.cursor()
-            ingest_status_check = 'processing'
-            table_name = f'stg_{tablename}'
-            file_name = os.path.basename(file_path)
             fakeupsert_query = """UPDATE sync_file 
                                 SET ingest_start_time = %s, 
                                     ingest_file_name = %s, 
-                                    ingest_table_name = %s, 
-                                    ingest_status_check = %s
-                                WHERE id = %s"""
-            cur.execute(fakeupsert_query, (self.load_start_time, file_name, table_name, 
-                                        ingest_status_check, self.syncfile_entryID))
+                                    ingest_table_name = %s
+                                WHERE id = %s
+                                """
+            self.load_start_time = datetime.now()
+            cur.execute(fakeupsert_query, (self.load_start_time, decrypted_file_name, staging_table, 
+                                           self.syncfile_entryID))
             conn.commit()
             cur.close()
-            logger.info('successfully updated sync_file records')
+            logger.info('successfully updated start_time, file_name and stg_table in sync_file')
 
         except Exception as e:
             logger.exception(e)
-            raise e 
+            raise e  
 
 
     def _update_log(self, proc_status, file_name, tab_count, error_msg):
@@ -305,17 +303,22 @@ class FileLoader:
             for file in files:
                 self.syncfile_entryID = file[0]
                 self.facility_id = file[1]
-                decryptedjson_file_name = file[2].replace('.json', '_decrypted.json')
-                local_dir = os.path.join(self.demo_path, self.facility_id, decryptedjson_file_name)
+                encrypted_file_name = file[2]
+                decrypted_file_name = encrypted_file_name.replace('.json', '_decrypted.json')
+                local_dir = os.path.join(self.demo_path, self.facility_id, decrypted_file_name)
+                tablename = self._process_derive_tablename(local_dir)
+                staging_table = f'stg_{tablename}'
 
                 if os.path.exists(local_dir):
-                    logger.info('-----------------------------------------------------------------------------')
+                    logger.info('----------------------------s-------------------------------------------------')
                     logger.info(f"The file '{local_dir}' exists.")
+                    self._fakeupsert_synclog(decrypted_file_name,staging_table)
                     self._process_file_by_name(local_dir)
                 else:
+                    self._fakeupsert_synclog(decrypted_file_name,staging_table)
                     logger.info(f"The file '{local_dir}' does not exist. Skipping to next file")
-                    self._update_flag_syncfile('loaded in the past', 3, 0, 'No errors')
-                    pass
+                    self.load_end_time = datetime.now()
+                    self._update_flag_syncfile('loaded in the past', 3, 0, NO_ERRORS)
                     
             cur.close()
             logger.info('json files successfully processed')
@@ -446,7 +449,7 @@ class FileLoader:
         if is_loaded_success:
             self.load_end_time = datetime.now()
             logger.info(f"The file {file_name} has been previously loaded successfully")
-            self._update_flag_syncfile('success', 2, self.count_of_df, 'No errors')  
+            self._update_flag_syncfile('success', 2, self.count_of_df, NO_ERRORS)  
             logger.info('Sync log has been updated successfully')
 
         elif is_loaded_failed:
@@ -704,8 +707,8 @@ class FileLoader:
                 conn.commit()
                 self.count_of_df = len(df)
                 self.load_end_time = datetime.now()
-                self._update_log('success', file_name, self.count_of_df, 'No errors')
-                self._update_flag_syncfile('success', 2, self.count_of_df, 'No errors')
+                self._update_log('success', file_name, self.count_of_df, NO_ERRORS)
+                self._update_flag_syncfile('success', 2, self.count_of_df, NO_ERRORS)
                 
                 cur = conn.cursor()
 

@@ -64,19 +64,28 @@ def update_pipeline_log(cur, log_id:str, end_time, status, error_message=None, r
     cur.execute(update_pipeline_query, (end_time, status, error_message, records_processed, log_id))
 
 def insert_facility_uploads():
-    insert_query = """
-                   INSERT INTO batch_facility_processing(facility_id,status,file_count)
-                   SELECT facility_id,'UNPROCESSED' status, COUNT(1) file_count
-                   FROM sync_file
-                   WHERE processed=%s AND modified_date >= %s
-                   GROUP BY 1,2
-                   """
     PROCESSED = 1
     MODIFIED_DATE = '2025-01-01'
+    insert_query = f"""
+                   INSERT INTO batch_facility_processing(facility_id,status,file_count)
+                   SELECT facility_id,'UNPROCESSED' status, COUNT(1) file_count
+                   FROM (SELECT facility_id,decrypted_file_name
+                     FROM sync_file 
+                        WHERE processed={PROCESSED} 
+                        AND modified_date >= {MODIFIED_DATE} LIMIT 500) z
+                   WHERE NOT (
+                   decrypted_file_name ILIKE ANY 
+                   (ARRAY['prep_eligibility_%','prep_clinic_%',
+                    'mhpss_confirmation_%','pmtct_anc_%',
+                   'dsd_devolvement_%','hiv_art_clinical_%'])
+                   )
+                   GROUP BY 1,2
+                   """
+
     try:
         with db_connect('filedb')[0] as conn:
             with conn.cursor() as cur:
-                cur.execute(insert_query, (PROCESSED, MODIFIED_DATE))
+                cur.execute(insert_query,)
                 conn.commit()
                 logger.info('Facility batch file uploads inserted into batch_facility_processing')
                 

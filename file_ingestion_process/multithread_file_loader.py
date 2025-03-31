@@ -132,7 +132,7 @@ class FileLoader:
             raise e 
 
 
-    def _fakeupsert_synclog(self, file_path, tablename):
+    def _fakeupsert_synclog(self, decrypted_file_name, staging_table):
         '''
         Performs a fake upsert operation on the sync_file table.
         This method updates an existing record in the sync_file table if it exists, or inserts a new one if it doesn't. 
@@ -146,20 +146,18 @@ class FileLoader:
         try:
             conn = self._db_connect('filedb')[0]
             cur = conn.cursor()
-            ingest_status_check = 'processing'
-            table_name = f'stg_{tablename}'
-            file_name = os.path.basename(file_path)
             fakeupsert_query = """UPDATE sync_file 
                                 SET ingest_start_time = %s, 
                                     ingest_file_name = %s, 
-                                    ingest_table_name = %s, 
-                                    ingest_status_check = %s
-                                WHERE id = %s"""
-            cur.execute(fakeupsert_query, (self.load_start_time, file_name, table_name, 
-                                        ingest_status_check, self.syncfile_entryID))
+                                    ingest_table_name = %s
+                                WHERE id = %s
+                                """
+            self.load_start_time = datetime.now()
+            cur.execute(fakeupsert_query, (self.load_start_time, decrypted_file_name, staging_table, 
+                                           self.syncfile_entryID))
             conn.commit()
             cur.close()
-            logger.info('successfully updated sync_file records')
+            logger.info('successfully updated start_time, file_name and stg_table in sync_file')
 
         except Exception as e:
             logger.exception(e)
@@ -225,6 +223,7 @@ class FileLoader:
                                 ingest_error_message = %s
                             WHERE id = %s
                             """
+            self.load_end_time = datetime.now()
             cur.execute(update_query, (proc_val, self.load_end_time, ingest_status_check, 
                                     tab_count, error_msg[0:10000], self.syncfile_entryID))
             conn.commit()
@@ -302,17 +301,22 @@ class FileLoader:
             for file in files:
                 self.syncfile_entryID = file[0]
                 self.facility_id = file[1]
-                decryptedjson_file_name = file[2].replace('.json', '_decrypted.json')
-                local_dir = os.path.join(self.demo_path, self.facility_id, decryptedjson_file_name)
+                encrypted_file_name = file[2]
+                decrypted_file_name = encrypted_file_name.replace('.json', '_decrypted.json')
+                local_dir = os.path.join(self.demo_path, self.facility_id, decrypted_file_name)
+                tablename = self._process_derive_tablename(local_dir)
+                staging_table = f'stg_{tablename}'
 
                 if os.path.exists(local_dir):
-                    logger.info('-----------------------------------------------------------------------------')
+                    logger.info('----------------------------s-------------------------------------------------')
                     logger.info(f"The file '{local_dir}' exists.")
+                    self._fakeupsert_synclog(decrypted_file_name,staging_table)
                     self._process_file_by_name(local_dir)
                 else:
+                    self._fakeupsert_synclog(decrypted_file_name,staging_table)
                     logger.info(f"The file '{local_dir}' does not exist. Skipping to next file")
-                    self._update_flag_syncfile('loaded in the past', 3, 0, 'NO_ERRORS')
-
+                    self.load_end_time = datetime.now()
+                    self._update_flag_syncfile('loaded in the past', 3, 0, NO_ERRORS)
                     
             cur.close()
             logger.info('json files successfully processed')
@@ -443,7 +447,7 @@ class FileLoader:
         if is_loaded_success:
             self.load_end_time = datetime.now()
             logger.info(f"The file {file_name} has been previously loaded successfully")
-            self._update_flag_syncfile('success', 2, self.count_of_df, 'NO_ERRORS')  
+            self._update_flag_syncfile('success', 2, self.count_of_df, NO_ERRORS)  
             logger.info('Sync log has been updated successfully')
 
         elif is_loaded_failed:
@@ -594,7 +598,7 @@ class FileLoader:
         datim_id = self.facility_id
         file_name = file_path.split('/')[-1]
         encrypted_file_name=file_name.replace('_decrypted','')
-        
+
         # Define the type mapping function
         def convert_postgresql_to_sqlalchemy(data_type):
             type_mapping = {
@@ -627,7 +631,8 @@ class FileLoader:
             # Check if DataFrame is empty after reading JSON
             if df.empty:
                 self._update_log('failed', file_name, 0, 'JSON file is empty')
-                self._update_flag_syncfile('failed', -2, 0, 'JSON file is empty', file_name)
+                # self.load_end_time = datetime.now()
+                self._update_flag_syncfile('failed', -2, 0, 'JSON file is empty')
                 logger.info('Sync File Log updated successfully')
                 return
             
@@ -677,7 +682,6 @@ class FileLoader:
                 # invalid_dates_df.to_sql(staging_table_bad_dates, con=engine, index=False, if_exists='append', dtype=dtype_mapping)
                 conn.commit()
                 self.count_of_df = len(valid_dates_df)
-                self.load_end_time = datetime.now()
                 self._update_log('failed', file_name, self.count_of_df, 'Few date errors spotted but files ingested')
                 self._update_flag_syncfile('failed', -2, self.count_of_df, f'{encrypted_file_name} has invalid dates: {validation_result}. Bad date records were filtered and {self.count_of_df} records successfully ingested')
                 cur = conn.cursor()
@@ -700,9 +704,8 @@ class FileLoader:
                 logger.info(f'{file_name} successfully ingested into {staging_table} table')
                 conn.commit()
                 self.count_of_df = len(df)
-                self.load_end_time = datetime.now()
-                self._update_log('success', file_name, self.count_of_df, 'NO_ERRORS')
-                self._update_flag_syncfile('success', 2, self.count_of_df, 'NO_ERRORS')
+                self._update_log('success', file_name, self.count_of_df, NO_ERRORS)
+                self._update_flag_syncfile('success', 2, self.count_of_df, NO_ERRORS)
                 
                 cur = conn.cursor()
 
