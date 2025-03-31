@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from src import logger
 import configparser
 
+NO_ERRORS = 'No errors'
 def read_db_config(filename='/home/lamisplus/database_credentials/config.ini', section='database'):
     # Create a parser
     parser = configparser.ConfigParser()
@@ -310,8 +311,8 @@ class FileLoader:
                     self._process_file_by_name(local_dir)
                 else:
                     logger.info(f"The file '{local_dir}' does not exist. Skipping to next file")
-                    self._update_flag_syncfile('loaded in the past', 3, 0, 'No errors')
-                    pass
+                    self._update_flag_syncfile('loaded in the past', 3, 0, 'NO_ERRORS')
+
                     
             cur.close()
             logger.info('json files successfully processed')
@@ -442,7 +443,7 @@ class FileLoader:
         if is_loaded_success:
             self.load_end_time = datetime.now()
             logger.info(f"The file {file_name} has been previously loaded successfully")
-            self._update_flag_syncfile('success', 2, self.count_of_df, 'No errors')  
+            self._update_flag_syncfile('success', 2, self.count_of_df, 'NO_ERRORS')  
             logger.info('Sync log has been updated successfully')
 
         elif is_loaded_failed:
@@ -700,8 +701,8 @@ class FileLoader:
                 conn.commit()
                 self.count_of_df = len(df)
                 self.load_end_time = datetime.now()
-                self._update_log('success', file_name, self.count_of_df, 'No errors')
-                self._update_flag_syncfile('success', 2, self.count_of_df, 'No errors')
+                self._update_log('success', file_name, self.count_of_df, 'NO_ERRORS')
+                self._update_flag_syncfile('success', 2, self.count_of_df, 'NO_ERRORS')
                 
                 cur = conn.cursor()
 

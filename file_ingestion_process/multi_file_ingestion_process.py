@@ -123,13 +123,6 @@ def create_single_instance(facility:tuple):
         logger.exception(f'ingestion of {file_count} files for {facility_id} failed', exc_info=True)
 
 def main():
-    db_params = {
-        'host': db_config['stg_host'],
-        'database': db_config['stg_database_name'],
-        'user': db_config['stg_username'],
-        'password': db_config['stg_password'],
-        'port': db_config['stg_port'],
-    }
     
     insert_facility_uploads()
     
