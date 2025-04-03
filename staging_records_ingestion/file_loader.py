@@ -11,29 +11,10 @@ from sqlalchemy import create_engine, JSON, Integer, String, Float, DateTime, Bo
 from sqlalchemy.dialects.postgresql import JSONB
 from src import logger
 import configparser
+from database_connection.db_connect import connect_to_db
 
 NO_ERRORS = 'No errors'
-parent_directory = ''
-# '/home/server_user/server/temp'
-database_credentials = ''
-# '/home/server_user/database_credentials/config.ini'
-
-def read_db_config(filename=database_credentials, section='database'):
-    # Create a parser
-    parser = configparser.ConfigParser()
-    # Read the configuration file
-    parser.read(filename)
-    # Get section, default to database
-    db = {}
-    if parser.has_section(section):
-        params = parser.items(section)
-        for param in params:
-            db[param[0]] = param[1]
-    else:
-        raise Exception(f'Section {section} not found in the {filename} file')
-    return db
-
-db_config = read_db_config()
+parent_directory = '/home/server_user/server/temp'
 
 pd.set_option('display.max_columns', None)
 
@@ -45,30 +26,6 @@ class FileLoader:
         self.count_of_df = 0
         self.load_end_time = None
         self.load_start_time = None
-
-    def _db_connect(self, database:str):
-        '''
-        Establishes a connection to the specified PostgreSQL database.
-        Parameters:
-        - database (str): The name of the database to connect to.
-        Returns:
-        - conn (psycopg2.connection): The connection object.
-        - engine (sqlalchemy.engine.base.Engine): The SQLAlchemy engine object.
-        Raises:
-        - Exception: If connection to the database fails.
-        '''
-        db_params = {'host': db_config['stg_host'], 'database': database, 'user': db_config['stg_username'],
-                     'password': db_config['stg_password'],'port': db_config['stg_port'],}
-        try:
-            conn = psycopg2.connect(**db_params)
-            engine = create_engine(f'postgresql://{db_params["user"]}:{db_params["password"]}@{db_params["host"]}:{db_params["port"]}/{db_params["database"]}')
-            
-            return [conn, engine]
-        
-        except Exception as e:
-            logger.exception(e)
-            raise e
-
 
     def _get_and_map_cols(self, table_name):
         '''
@@ -82,7 +39,7 @@ class FileLoader:
         - Exception: If an error occurs while retrieving column information.
         '''
         try:
-            conn = self._db_connect('lamisplus_staging_dwh')[0]
+            conn = connect_to_db.connect('lamisplus_staging_dwh')[0]
             cur = conn.cursor()
 
             retrieve_query = f"""SELECT column_name, data_type
@@ -115,7 +72,7 @@ class FileLoader:
         - Exception: If an error occurs while inserting the record into the file_ingestion_log table.
         '''
         try:
-            conn = self._db_connect('lamisplus_staging_dwh')[0]
+            conn = connect_to_db.connect('lamisplus_staging_dwh')[0]
             cur = conn.cursor()
             self.load_start_time = datetime.now()
             load_status_check = 'processing'
@@ -149,7 +106,7 @@ class FileLoader:
         - Exception: If an error occurs while performing the fake upsert operation on the sync_file table.
         '''
         try:
-            conn = self._db_connect('filedb')[0]
+            conn = connect_to_db.connect('filedb')[0]
             cur = conn.cursor()
             fakeupsert_query = """UPDATE sync_file 
                                 SET ingest_start_time = %s, 
@@ -183,7 +140,7 @@ class FileLoader:
         - Exception: If an error occurs while updating the file ingestion log.
         '''
         try:
-            conn = self._db_connect('lamisplus_staging_dwh')[0]
+            conn = connect_to_db.connect('lamisplus_staging_dwh')[0]
             cur = conn.cursor()
             load_status_check = proc_status
             update_query = """UPDATE file_ingestion_log 
@@ -217,7 +174,7 @@ class FileLoader:
         - Exception: If an error occurs while updating the synchronization file log.
         '''  
         try: 
-            conn = self._db_connect('filedb')[0]
+            conn = connect_to_db.connect('filedb')[0]
             cur = conn.cursor()
             ingest_status_check = proc_status
             update_query = """UPDATE sync_file 
@@ -248,7 +205,7 @@ class FileLoader:
         - Exception: If an error occurs while updating the central partner mapping.
         '''
         try:
-            conn = self._db_connect('lamisplus_staging_dwh')[0]
+            conn = connect_to_db.connect('lamisplus_staging_dwh')[0]
             cur = conn.cursor()
 
             get_patient_count = """
@@ -259,7 +216,7 @@ class FileLoader:
             p_count_per_datemid = cur.fetchone()[0]
             cur.close()
 
-            conn = self._db_connect('filedb')[0]
+            conn = connect_to_db.connect('filedb')[0]
             cur = conn.cursor()
             update_query = """UPDATE central_partner_mapping 
                             SET patient_count = %s
@@ -285,11 +242,11 @@ class FileLoader:
         - Exception: If an error occurs while retrieving or processing files from the sync_file table.
         '''
         try:
-            conn = self._db_connect('filedb')[0]
+            conn = connect_to_db.connect('filedb')[0]
             cur = conn.cursor()
             retrieve_query = """
             SELECT id, facility_id, decrypted_file_name 
-            FROM sync_file WHERE processed = 1 AND modified_date >= '2025-02-01 00:00:00' 
+            FROM sync_file WHERE processed = 1 AND modified_date >= '2025-01-01 00:00:00' 
 		--AND decrypted_file_name ILIKE 'patient_person_%'
 	      AND NOT (decrypted_file_name ILIKE ANY 
 	      (ARRAY['prep_eligibility_%','prep_clinic_%', 'mhpss_confirmation_%',
@@ -366,7 +323,7 @@ class FileLoader:
         - Exception: If an error occurs during the database query.    
         '''
         try:
-            conn = self._db_connect('lamisplus_staging_dwh')[0]
+            conn = connect_to_db.connect('lamisplus_staging_dwh')[0]
             cur = conn.cursor()
             check_query = """SELECT COUNT(*) FROM file_ingestion_log 
                             WHERE file_name = %s AND facility_id = %s AND load_status_check = 'success' """
@@ -397,7 +354,7 @@ class FileLoader:
         - Exception: If an error occurs during the database query.
         '''
         try:
-            conn = self._db_connect('lamisplus_staging_dwh')[0]
+            conn = connect_to_db.connect('lamisplus_staging_dwh')[0]
             cur = conn.cursor()
             check_query = """SELECT COUNT(*) FROM file_ingestion_log 
                             WHERE file_name = %s AND facility_id = %s 
@@ -594,7 +551,7 @@ class FileLoader:
         Raises:
             Exception: If an error occurs during the ingestion process.
         '''
-        conn, engine = self._db_connect('lamisplus_staging_dwh')[0], self._db_connect('lamisplus_staging_dwh')[1]
+        conn, engine = connect_to_db.connect('lamisplus_staging_dwh')[0], connect_to_db.connect('lamisplus_staging_dwh')[1]
         load_time = datetime.now()
         batch_id = file_path.split('_')[-2]
         datim_id = self.facility_id
