@@ -1,4 +1,4 @@
-from automate_stg_records_delete import StgRecordDelete
+from file_ingestion_process.staging_records_extraction.automate_table_extraction import StgRecordExtraction
 from datetime import datetime
 import psycopg2
 from src import logger
@@ -49,11 +49,11 @@ def main():
 
     try:
         logger.info('Job Started')
-        logger.info('Deletion of records with Y processed status on stg_monitoring table started')
-        deleting_records = StgRecordDelete()
-        deleting_records.delete_staging_table_records()
+        logger.info('Exraction of bad dates records from staging tables started')
+        deleting_records = StgRecordExtraction()
+        deleting_records.extract_bad_dates_tables()
         conn.commit()
-        logger.info('Deletion of records with Y processed status on stg_monitoring table completed')
+        logger.info('Exraction of bad dates records from staging tables completed')
         
     except Exception as e:
         error_msg =str(e)
